@@ -70,12 +70,16 @@ class BarsDataSet(Dataset):
     def __init__(self, allTickers, allBars):
         self.allTickers = allTickers
         self.allBars = allBars
-        self.allDates = set()
+        self.allStartTimes = set()
         for bar in allBars:
-            self.allDates.add(bar.startTime)
+            self.allStartTimes.add(bar.startTime)
+        self.nPastBars = 3 # how many bars we use for prediction
+        self.nFutureBars = 1 # how many bars ahead we're trying to predict
+        self.nTotalExamples = len(allBars) - self.nPastBars - (self.nFutureBars - 1)
+        self.nTrainingExamples = self.nTotalExamples * 9 / 10
 
     def __len__(self):
-        return len(self.words)
+        return len(self.allDates)
 
     def __getitem__(self, idx):
         word = self.words[idx]
