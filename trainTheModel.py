@@ -16,6 +16,8 @@ from torch.utils.tensorboard import SummaryWriter
 import csv
 from datetime import datetime
 
+import functools
+
 class Bar:
     def __init__(self, iTicker, csvRow):
         self.iTicker = -1;
@@ -65,29 +67,59 @@ def readTickersAndBars(nMaxTickers = -1, nMaxBarsPerTicket = -1):
 
     return allTickers, allBars
 
+class BarsPerTime:
+
+    def __init__(self, startTime, pBars):
+        self.startTime = startTime
+        self.pBars = pBars
+
+def compareBarsPerTime(a, b):
+    if a.startTime > b.startTime:
+        return -1
+    elif a.startTime == b.startTime:
+        return 0
+    else:
+        return 1
+
 class BarsDataSet(Dataset):
 
     def __init__(self, allTickers, allBars):
         self.allTickers = allTickers
-        self.allBars = allBars
-        self.allStartTimes = {}
+
+        allStartTimes = {}
         for bar in allBars:
-            # try/except will create array if it doesn't exist yet
+            # try/except will create an array if it doesn't exist yet
             try:
-                self.allStartTimes[bar.startTime].append(bar)
-            except: self.allStartTimes[bar.startTime] = [bar]
+                allStartTimes[bar.startTime].append(bar)
+            except: allStartTimes[bar.startTime] = [bar]
+
+        # repackage the dict as an array
+        self.allStartTimes = []
+        for startTime in allStartTimes:
+            self.allStartTimes.append(BarsPerTime(startTime, allStartTimes[startTime]))
+        # sort times in ascending order
+        self.allStartTimes.sort(key=functools.cmp_to_key(compareBarsPerTime))
+
         self.nPastBars = 3 # how many bars we use for prediction
         self.nFutureBars = 1 # how many bars ahead we're trying to predict
         self.nTotalExamples = len(self.allStartTimes) - self.nPastBars - self.nFutureBars + 1
         self.nTrainingExamples = int(self.nTotalExamples * 9 / 10)
+        # on each timestep each ticker is a separate example
+        self.nTotalExamples *= len(allTickers)
+        self.nTrainingExamples *= len(allTickers)
 
     def __len__(self):
         return self.nTrainingExamples
 
     def __getitem__(self, idx):
-        word = self.words[idx]
-        ix = self.encode(word)
-        x = torch.zeros(self.max_word_length + 1, dtype=torch.long)
+        # as input we provide:
+        # for each ticker: open for the first bar
+        # for each ticker and for each past bar: min, max, close, volume
+        nTickers = len(self.allTickers)
+        x = torch.zeros(nTickers + nTickers * self.nPastBars * 4)
+        for iStartTime in range(idx + self.nPastBars - 1, -1, -1):
+            for bar in self.allStartTimes:
+                bar = bar
         y = torch.zeros(self.max_word_length + 1, dtype=torch.long)
         x[1:1+len(ix)] = ix
         y[:len(ix)] = ix
