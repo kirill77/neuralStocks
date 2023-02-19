@@ -1,8 +1,14 @@
 import torch
 from torch.utils.data import Dataset
 import functools
+import csv
+from datetime import datetime
+from bar import Bar
 
 # global constants
+N_MAX_TICKERS = 10
+N_MAX_BARS_PER_TICKER = 100
+N_TRAINING_BARS_PERCENT = 80
 STRONG_SELL = 0
 SELL = 1
 BUY = 2
@@ -24,31 +30,23 @@ class BarsDataSet(Dataset):
         self.allTickers = allTickers
         self.allBars = allBars
 
-        # sort all bars by time, and then by the ticker index
-        allBars.sort(key = functools.cmp_to_key(compareBars))
-
         nTickers = len(self.allTickers)
-        for barIndex in range(nTickers, len(allBars), nTickers):
-            # check that dates to in ascending order
-            assert(allBars[barIndex].startTime > allBars[barIndex - nTickers].startTime)
-
         for barIndex, bar in enumerate(allBars):
-            assumedTickerIndex = barIndex % nTickers
             # check that we're not missing any tickers and they go in ascending order
-            assert(assumedTickerIndex == bar.iTicker)
-            # check that 
-            assert(bar.iTicker == 0 or bar.startTime == allBars[barIndex - 1].startTime)
+            assert(bar.iTicker == barIndex % nTickers)
+            if (bar.iTicker == 0):
+                # check that ticker 0 has larger time than the previous ticker
+                assert(barIndex == 0 or bar.startTime > allBars[barIndex - 1].startTime)
+            else:
+                # all all other tickers have the same time as the previous ticker
+                assert(bar.startTime == allBars[barIndex - 1].startTime)
 
-        nStartTimes = len(self.allBars) / nTickers
-
-        self.nTotalExamples = int(nStartTimes - N_PAST_BARS - N_FUTURE_BARS + 1)
-        self.nTrainingExamples = int(self.nTotalExamples * 9 / 10)
-        # on each timestep each ticker is a separate example
-        self.nTotalExamples *= len(allTickers)
-        self.nTrainingExamples *= len(allTickers)
+        nTimesPerTicker = len(self.allBars) / nTickers
+        self.nTotalExamples = int(nTimesPerTicker - N_PAST_BARS - N_FUTURE_BARS + 1)
+        self.nTotalExamples *= nTickers
 
     def __len__(self):
-        return self.nTrainingExamples
+        return self.nTotalExamples
 
     def getPredictedTickerTensor(self, iPredictedTicker):
         nTickers = len(self.allTickers)
@@ -144,3 +142,67 @@ class BarsDataSet(Dataset):
         y = self.getDecisionTensor(iPresentBar)
 
         return x, y
+
+def readTickersAndBars():
+    # load list of tickers
+    with open("tickers.txt", 'r') as f:
+        data = f.read()
+    allTickers = data.splitlines()
+    allTickers = [w.strip() for w in allTickers] # get rid of any leading or trailing white space
+    allTickers = [w for w in allTickers if w] # get rid of any empty strings
+    if (N_MAX_TICKERS != -1):
+        allTickers = allTickers[0:N_MAX_TICKERS]
+    print(f"number of tickers in the dataset: {len(allTickers)}")
+
+    allBars = []
+
+    # for each ticker - load its bars from the file
+    for iTicker, sTicker in enumerate(allTickers):
+        fileName = f"./history/{sTicker}_1h.csv"
+        print(f"loading bars for {sTicker}")
+        nBarsThisTicker = 0;
+        with open (fileName) as csvFile:
+            csvRows = csv.reader(csvFile)
+            for csvRow in csvRows:
+                bar = Bar(iTicker, csvRow)
+                if (bar.iTicker < 0):
+                    continue
+                allBars.append(bar)
+                nBarsThisTicker += 1
+                if N_MAX_BARS_PER_TICKER > 0 and nBarsThisTicker >= N_MAX_BARS_PER_TICKER:
+                    break
+    print(f"loaded {len(allBars)} bars")
+
+    return allTickers, allBars
+
+def verifyBarsDataSet(dataSet):
+    # check that the number of items is correct
+    firstItem = dataSet.__getitem__(0) # first item must exist
+    lastItem = dataSet.__getitem__(dataSet.nTotalExamples - 1) # last item must exist
+    # one after last item must NOT exist
+    errorOccurred = False
+    try:
+        invalidItem = dataSet.__getitem__(dataSet.nTotalExamples)
+    except: errorOccurred = True
+    assert(errorOccurred)
+
+def createBarDataSets():
+    allTickers, allBars = readTickersAndBars()
+
+    # sort all bars by time, and then by the ticker index
+    allBars.sort(key = functools.cmp_to_key(compareBars))
+
+    nTickers = len(allTickers)
+    nBarsPerTicker = len(allBars) / nTickers
+    assert(nBarsPerTicker == int(nBarsPerTicker))
+    nBarsPerTicker = int(nBarsPerTicker)
+    nTrainingBarsPerTicker = int(nBarsPerTicker * N_TRAINING_BARS_PERCENT / 100)
+    nTrainingBars = nTrainingBarsPerTicker * nTickers;
+    trainingBars = allBars[0:nTrainingBars]
+    testingBars = allBars[nTrainingBars:]
+
+    trainingSet = BarsDataSet(allTickers, trainingBars)
+    verifyBarsDataSet(trainingSet)
+    testingSet = BarsDataSet(allTickers, testingBars)
+    verifyBarsDataSet(testingSet)
+    return trainingSet, testingSet
