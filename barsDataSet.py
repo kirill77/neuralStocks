@@ -7,7 +7,7 @@ from bar import Bar
 
 # global constants
 N_MAX_TICKERS = 10
-N_MAX_BARS_PER_TICKER = 100
+N_MAX_BARS_PER_TICKER = -1
 N_TRAINING_BARS_PERCENT = 80
 STRONG_SELL = 0
 SELL = 1
@@ -24,26 +24,28 @@ def compareBars(a, b):
         return 1
     return -1 if a.iTicker < b.iTicker else 1
 
+def validateBars(allTickers, allBars):
+    nTickers = len(allTickers)
+    for barIndex, bar in enumerate(allBars):
+        # check that we're not missing any tickers and they go in ascending order
+        assert(bar.iTicker == barIndex % nTickers)
+        if (bar.iTicker == 0):
+            # check that ticker 0 has larger time than the previous ticker
+            assert(barIndex == 0 or bar.startTime > allBars[barIndex - 1].startTime)
+        else:
+            # all all other tickers have the same time as the previous ticker
+            assert(bar.startTime == allBars[barIndex - 1].startTime)
+
 class BarsDataSet(Dataset):
 
     def __init__(self, allTickers, allBars):
         self.allTickers = allTickers
         self.allBars = allBars
 
-        nTickers = len(self.allTickers)
-        for barIndex, bar in enumerate(allBars):
-            # check that we're not missing any tickers and they go in ascending order
-            assert(bar.iTicker == barIndex % nTickers)
-            if (bar.iTicker == 0):
-                # check that ticker 0 has larger time than the previous ticker
-                assert(barIndex == 0 or bar.startTime > allBars[barIndex - 1].startTime)
-            else:
-                # all all other tickers have the same time as the previous ticker
-                assert(bar.startTime == allBars[barIndex - 1].startTime)
+        validateBars(self.allTickers, self.allBars)
 
         nTimesPerTicker = len(self.allBars) / nTickers
-        self.nTotalExamples = int(nTimesPerTicker - N_PAST_BARS - N_FUTURE_BARS + 1)
-        self.nTotalExamples *= nTickers
+        self.nTotalExamples = nTickers * int(nTimesPerTicker - N_PAST_BARS - N_FUTURE_BARS + 1)
 
     def __len__(self):
         return self.nTotalExamples
@@ -96,7 +98,7 @@ class BarsDataSet(Dataset):
 
         nNonZero = torch.count_nonzero(y).item()
         if (nNonZero > 1):
-            y = torch.zeroes(5)
+            y = torch.zeros(5)
             y[NOT_SURE] = 1
         elif (nNonZero == 0):
             y[NOT_SURE] = 1
@@ -113,12 +115,13 @@ class BarsDataSet(Dataset):
         assert(hour >= 0 and hour < 7)
         x[5 + hour] = 1
         nTickers = len(self.allTickers)
-        for i in range(0, N_PAST_BARS):
-            time1 = self.allBars[iFirstBar + (i + 1) * nTickers].startTime
+        # this takes a note if the time difference between the bars is non-standard
+        for i in range(1, N_PAST_BARS):
+            time1 = self.allBars[iFirstBar + i * nTickers].startTime
             diffSeconds = int((time1 - time0).total_seconds())
             time0 = time1
             if (diffSeconds != 3600):
-                x[5 + 7 + i] = 1 # take note if the time difference between the bars is non-standard
+                x[5 + 7 + i - 1] = 1
         return x
 
     def __getitem__(self, idx):
@@ -192,6 +195,9 @@ def createBarDataSets():
     # sort all bars by time, and then by the ticker index
     allBars.sort(key = functools.cmp_to_key(compareBars))
 
+    validateBars(allTickers, allBars)
+
+    # split all bars to training and testing datasets
     nTickers = len(allTickers)
     nBarsPerTicker = len(allBars) / nTickers
     assert(nBarsPerTicker == int(nBarsPerTicker))
