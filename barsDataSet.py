@@ -49,12 +49,13 @@ class BarsDataSet(Dataset):
         # to qualify as an example - all PAST_BARS and all FUTURE_BARS of the given stock must be known
         self.allExamples = []
         for firstBarIndex in range(0, len(allBars)):
-            nValidBars = 0
+            allValid = True
             for i in range(0, N_PAST_BARS + N_FUTURE_BARS):
                 barIndex = firstBarIndex + i * len(allTickers)
-                if barIndex < len(allBars) and allBars[barIndex].fVolume is not None:
-                    nValidBars += 1
-            if (nValidBars == N_PAST_BARS + N_FUTURE_BARS):
+                if barIndex >= len(allBars) or allBars[barIndex].fVolume is None:
+                    allValid = False
+                    break
+            if (allValid):
                 self.allExamples.append(firstBarIndex)
 
     def __len__(self):
@@ -74,13 +75,13 @@ class BarsDataSet(Dataset):
         pCounts = [0] * nTickers
         for iBar in range(iFirstBar, iFirstBar + N_PAST_BARS * nTickers):
             bar = self.allBars[iBar]
-            if (bar.fVolume is None):
-                continue;
+            if (bar.fVolume is None): # means bar is invalid (we have some gaps in the dataset)
+                continue
             self.pVolScalers[bar.iTicker] += bar.fVolume
             self.pPriceScalers[bar.iTicker] += (bar.fMin + bar.fMax + bar.fOpen + bar.fClose) / 4
             pCounts[bar.iTicker] += 1
         for i in range(0, nTickers):
-            assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS) # we are supposed to compute average over past bars
+            assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS)
             self.pVolScalers[i] / pCounts[i]
             self.pPriceScalers[i] / pCounts[i]
 
@@ -151,12 +152,13 @@ class BarsDataSet(Dataset):
         tTime = self.getTimeTensor(iFirstBar)
         x = torch.cat((x, tTime), 0)
 
-        # encode all past bars (must be nTickers * N_PAST_BARS tensors)
+        # encode all past bars
         self.updateScalingValues(iFirstBar)
         for iBar in range(0, nTickers * N_PAST_BARS):
             tBar = self.getBarTensor(iFirstBar + iBar)
             x = torch.cat((x, tBar), 0)
 
+        # encode the trading decision
         iPresentBar = iFirstBar + iPredictedTicker + nTickers * (N_PAST_BARS - 1)
         y = self.getDecisionTensor(iPresentBar)
 
