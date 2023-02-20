@@ -20,6 +20,10 @@ WEIGHT_DECAY = 0.001
 
 trainingSet, testingSet = createBarDataSets()
 
+print(f"number of training examples: {len(trainingSet)}")
+print(f"number of testing examples: {len(testingSet)}")
+
+print("creating data loader...")
 batchLoader = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
 
 modelConfig = initModelConfig(trainingSet)
@@ -61,5 +65,6 @@ def train(model, batchLoader, lossFunction, optimizer):
     print('Average loss:', total_loss / num_batches)
 
 # Example usage of the training loop
+print("starting training...")
 for epoch in range(100):
     train(model, batchLoader, lossFunction, optimizer)

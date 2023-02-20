@@ -16,3 +16,10 @@ class Bar:
             self.fVolume = float(csvRow[5])
         except: return
         self.iTicker = iTicker
+    def notifyNoData(self, iTicker):
+        self.fOpen = None
+        self.fMax = None
+        self.fMin = None
+        self.fClose = None
+        self.fVolume = None
+        self.iTicker = iTicker

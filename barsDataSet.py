@@ -4,6 +4,7 @@ import functools
 import csv
 from datetime import datetime
 from bar import Bar
+import copy
 
 # global constants
 N_MAX_TICKERS = 10
@@ -44,11 +45,20 @@ class BarsDataSet(Dataset):
 
         validateBars(self.allTickers, self.allBars)
 
-        nTimesPerTicker = len(self.allBars) / nTickers
-        self.nTotalExamples = nTickers * int(nTimesPerTicker - N_PAST_BARS - N_FUTURE_BARS + 1)
+        # create all examples
+        # to qualify as an example - all PAST_BARS and all FUTURE_BARS of the given stock must be known
+        self.allExamples = []
+        for firstBarIndex in range(0, len(allBars)):
+            nValidBars = 0
+            for i in range(0, N_PAST_BARS + N_FUTURE_BARS):
+                barIndex = firstBarIndex + i * len(allTickers)
+                if barIndex < len(allBars) and allBars[barIndex].fVolume is not None:
+                    nValidBars += 1
+            if (nValidBars == N_PAST_BARS + N_FUTURE_BARS):
+                self.allExamples.append(firstBarIndex)
 
     def __len__(self):
-        return self.nTotalExamples
+        return len(self.allExamples)
 
     def getPredictedTickerTensor(self, iPredictedTicker):
         nTickers = len(self.allTickers)
@@ -64,11 +74,13 @@ class BarsDataSet(Dataset):
         pCounts = [0] * nTickers
         for iBar in range(iFirstBar, iFirstBar + N_PAST_BARS * nTickers):
             bar = self.allBars[iBar]
+            if (bar.fVolume is None):
+                continue;
             self.pVolScalers[bar.iTicker] += bar.fVolume
             self.pPriceScalers[bar.iTicker] += (bar.fMin + bar.fMax + bar.fOpen + bar.fClose) / 4
             pCounts[bar.iTicker] += 1
         for i in range(0, nTickers):
-            assert(pCounts[i] == N_PAST_BARS) # we are supposed to compute average over past bars
+            assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS) # we are supposed to compute average over past bars
             self.pVolScalers[i] / pCounts[i]
             self.pPriceScalers[i] / pCounts[i]
 
@@ -76,7 +88,10 @@ class BarsDataSet(Dataset):
             bar = self.allBars[iBar]
             fVolScaler = self.pVolScalers[bar.iTicker]
             fPriceScaler = self.pPriceScalers[bar.iTicker]
-            tmpList = [bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolScaler]
+            if (bar.fVolume is None):
+                tmpList = [0, 0, 0, 0, 0]
+            else:
+                tmpList = [1, bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolScaler]
             return torch.tensor(tmpList)
 
     def getDecisionTensor(self, iPresentBar):
@@ -126,8 +141,9 @@ class BarsDataSet(Dataset):
 
     def __getitem__(self, idx):
         nTickers = len(self.allTickers)
-        iFirstBar = nTickers * int(idx / nTickers)
-        iPredictedTicker = idx % nTickers
+        iExampleBar = self.allExamples[idx]
+        iFirstBar = int(iExampleBar / nTickers) * nTickers
+        iPredictedTicker = self.allBars[iExampleBar].iTicker
  
         x = self.getPredictedTickerTensor(iPredictedTicker)
 
@@ -181,11 +197,11 @@ def readTickersAndBars():
 def verifyBarsDataSet(dataSet):
     # check that the number of items is correct
     firstItem = dataSet.__getitem__(0) # first item must exist
-    lastItem = dataSet.__getitem__(dataSet.nTotalExamples - 1) # last item must exist
+    lastItem = dataSet.__getitem__(len(dataSet) - 1) # last item must exist
     # one after last item must NOT exist
     errorOccurred = False
     try:
-        invalidItem = dataSet.__getitem__(dataSet.nTotalExamples)
+        invalidItem = dataSet.__getitem__(len(dataSet))
     except: errorOccurred = True
     assert(errorOccurred)
 
@@ -193,12 +209,26 @@ def createBarDataSets():
     allTickers, allBars = readTickersAndBars()
 
     # sort all bars by time, and then by the ticker index
+    print("sorting bars...")
     allBars.sort(key = functools.cmp_to_key(compareBars))
 
+    # insert invalid bars at the places where some data was missing
+    print("fixing bars...")
+    nTickers = len(allTickers)
+    for barIndex, bar in enumerate(allBars):
+        assumedTickerIndex = barIndex % nTickers
+        if (bar.iTicker != assumedTickerIndex):
+            if (assumedTickerIndex > 0):
+                allBars.insert(barIndex, copy.copy(allBars[barIndex - 1]))
+            else:
+                allBars.insert(barIndex, copy.copy(allBars[barIndex]))
+            allBars[barIndex].notifyNoData(assumedTickerIndex)
+
+    print("validating bars...")
     validateBars(allTickers, allBars)
 
     # split all bars to training and testing datasets
-    nTickers = len(allTickers)
+    print("splitting bars to training and testing datasets...")
     nBarsPerTicker = len(allBars) / nTickers
     assert(nBarsPerTicker == int(nBarsPerTicker))
     nBarsPerTicker = int(nBarsPerTicker)
@@ -207,6 +237,7 @@ def createBarDataSets():
     trainingBars = allBars[0:nTrainingBars]
     testingBars = allBars[nTrainingBars:]
 
+    print("creating training and testing datasets...")
     trainingSet = BarsDataSet(allTickers, trainingBars)
     verifyBarsDataSet(trainingSet)
     testingSet = BarsDataSet(allTickers, testingBars)
