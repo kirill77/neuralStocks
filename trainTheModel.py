@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
+from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
 from barsDataSet import createBarDataSets
 from theModel import initModelConfig, MyModel
@@ -17,26 +18,11 @@ from theModel import initModelConfig, MyModel
 BATCH_SIZE = 512
 LEARNING_RATE = 0.1
 WEIGHT_DECAY = 0.001
-
-trainingSet, testingSet = createBarDataSets()
-
-print(f"number of training examples: {len(trainingSet)}")
-print(f"number of testing examples: {len(testingSet)}")
-
-print("creating data loader...")
-batchLoader = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
-
-modelConfig = initModelConfig(trainingSet)
-model = MyModel(modelConfig)
-model.to("cuda") # run on the GPU
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, betas=(0.9, 0.99), eps=1e-8)
-
-lossFunction = nn.MSELoss()
-lossFunction.to("cuda")
+IS_CUDA = True
 
 # Define the training loop
 def train(model, batchLoader, lossFunction, optimizer, iEpoch):
+
     # Set the model to train mode
     model.train()
 
@@ -48,8 +34,9 @@ def train(model, batchLoader, lossFunction, optimizer, iEpoch):
 
     # Loop over the training data
     for data, target in batchLoader:
-        data = data.to("cuda")
-        target = target.to("cuda")
+        if (IS_CUDA):
+            data = data.to("cuda")
+            target = target.to("cuda")
         
         # Zero the gradients
         optimizer.zero_grad()
@@ -69,11 +56,48 @@ def train(model, batchLoader, lossFunction, optimizer, iEpoch):
         num_batches += 1
 
     # Print stats about this epoch
-    torch.cuda.synchronize()
+    if (IS_CUDA):
+        torch.cuda.synchronize()
     t1 = time.time()
-    print(f"Epoch {iEpoch}, nBatches: {num_batches}, avg.loss: {total_loss / num_batches}, time {(t1-t0)*1000:.2f}ms")
+    avgLoss = total_loss / num_batches
+    print(f"Epoch {iEpoch}, nBatches: {num_batches}, avg.loss: {avgLoss}, time: {(t1-t0)*1000:.2f}ms, "\
+          f"lr: {optimizer.state_dict()['param_groups'][0]['lr']}")
+    return avgLoss
 
-# Example usage of the training loop
-print("starting training...")
-for iEpoch in range(100):
-    train(model, batchLoader, lossFunction, optimizer, iEpoch)
+def main():
+    writer = SummaryWriter('logs')
+
+    trainingSet, testingSet = createBarDataSets()
+
+    print(f"number of training examples: {len(trainingSet)}")
+    print(f"number of testing examples: {len(testingSet)}")
+
+    print("creating data loader...")
+    batchLoader = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
+
+    modelConfig = initModelConfig(trainingSet)
+    model = MyModel(modelConfig)
+    if (IS_CUDA):
+        model.to("cuda") # run on the GPU
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, betas=(0.9, 0.99), eps=1e-8)
+
+    scheduler = StepLR(optimizer, step_size=2, gamma=0.5)
+
+    lossFunction = nn.MSELoss()
+    if (IS_CUDA):
+        lossFunction.to("cuda")
+
+    # Example usage of the training loop
+    print("starting training...")
+    for iEpoch in range(100):
+        avgLoss = train(model, batchLoader, lossFunction, optimizer, iEpoch)
+        scheduler.step()
+
+        # Log the loss to TensorBoard
+        writer.add_scalar('training_loss', avgLoss, iEpoch)
+
+    writer.close()
+
+if __name__ == "__main__":
+    main()
