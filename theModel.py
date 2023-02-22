@@ -18,8 +18,9 @@ class MyModel(nn.Module):
         super().__init__()
         self.layer0 = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures * 2)
         self.function = nn.ReLU()
-        self.layer1 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures)
-        self.layer2 = nn.Linear(in_features = config.nInputFeatures, out_features = config.nOutputFeatures)
+        self.layer1 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures * 2)
+        self.layer2 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures)
+        self.layer3 = nn.Linear(in_features = config.nInputFeatures, out_features = config.nOutputFeatures)
 
     def forward(self, x):
         y = self.layer0(x)
@@ -27,4 +28,6 @@ class MyModel(nn.Module):
         y = self.layer1(y)
         y = self.function(y)
         y = self.layer2(y)
+        y = self.function(y)
+        y = self.layer3(y)
         return y
