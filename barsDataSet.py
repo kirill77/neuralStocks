@@ -85,15 +85,18 @@ class BarsDataSet(Dataset):
             self.pVolScalers[i] / pCounts[i]
             self.pPriceScalers[i] / pCounts[i]
 
-    def getBarTensor(self, iBar):
-            bar = self.allBars[iBar]
-            fVolScaler = self.pVolScalers[bar.iTicker]
-            fPriceScaler = self.pPriceScalers[bar.iTicker]
-            if (bar.fVolume is None):
-                tmpList = [0, 0, 0, 0, 0]
-            else:
-                tmpList = [1, bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolScaler]
-            return torch.tensor(tmpList)
+    def getPastBarsTensor(self, iFirstBar):
+            self.updateScalingValues(iFirstBar)
+            nTickers = len(self.allTickers)
+            x = torch.zeros(5 * nTickers * N_PAST_BARS)
+            for iBar in range(0, nTickers * N_PAST_BARS):
+                bar = self.allBars[iFirstBar + iBar]
+                fVolScaler = self.pVolScalers[bar.iTicker]
+                fPriceScaler = self.pPriceScalers[bar.iTicker]
+                if (bar.fVolume is not None):
+                    tmpList = [1, bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolScaler]
+                    x[iBar * 5 : iBar * 5 + 5] = torch.tensor(tmpList)
+            return x
 
     def getDecisionTensor(self, iPresentBar):
         nTickers = len(self.allTickers)
@@ -153,10 +156,8 @@ class BarsDataSet(Dataset):
         x = torch.cat((x, tTime), 0)
 
         # encode all past bars
-        self.updateScalingValues(iFirstBar)
-        for iBar in range(0, nTickers * N_PAST_BARS):
-            tBar = self.getBarTensor(iFirstBar + iBar)
-            x = torch.cat((x, tBar), 0)
+        tBar = self.getPastBarsTensor(iFirstBar)
+        x = torch.cat((x, tBar), 0)
 
         # encode the trading decision
         iPresentBar = iFirstBar + iPredictedTicker + nTickers * (N_PAST_BARS - 1)
