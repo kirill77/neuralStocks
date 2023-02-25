@@ -92,24 +92,40 @@ class BarsDataSet(Dataset):
                 pCounts[bar.iTicker] += 1
             for i in range(0, nTickers):
                 assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS)
-                pVolumeScalers[i] / pCounts[i]
-                pPriceScalers[i] / pCounts[i]
-            self.pPriceScalers[iTimeBar] = pPriceScalers
-            self.pVolumeScalers[iTimeBar] = pVolumeScalers
+                pVolumeScalers[i] /= pCounts[i]
+                pPriceScalers[i] /= pCounts[i]
+            self.pPriceScalers[iTimeBar] = torch.tensor(pPriceScalers)
+            self.pVolumeScalers[iTimeBar] = torch.tensor(pVolumeScalers)
         return self.pPriceScalers[iTimeBar], self.pVolumeScalers[iTimeBar]
+    
+    def getOneBarAllTickersTensor(self, iFirstBar):
+            nTickers = len(self.allTickers)
+            x = [0] * 5 * nTickers
+            for iBar in range(0, nTickers):
+                bar = self.allBars[iFirstBar + iBar]
+                if (bar.fVolume is not None):
+                    x[iBar] = bar.fMin
+                    x[iBar + nTickers] = bar.fMax
+                    x[iBar + nTickers * 2] = bar.fClose
+                    x[iBar + nTickers * 3] = bar.fVolume
+                    x[iBar + nTickers * 4] = 1 # indicates this is a valid bar
+            return torch.tensor(x)
 
     def getPastBarsTensor(self, iFirstBar):
-            pPriceScalers, pVolumeScalers = self.getScalers(iFirstBar)
             nTickers = len(self.allTickers)
-            x = torch.zeros(5 * nTickers * N_PAST_BARS)
-            for iBar in range(0, nTickers * N_PAST_BARS):
-                bar = self.allBars[iFirstBar + iBar]
-                fPriceScaler = pPriceScalers[bar.iTicker]
-                fVolumeScaler = pVolumeScalers[bar.iTicker]
-                if (bar.fVolume is not None):
-                    tmpList = [1, bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolumeScaler]
-                    x[iBar * 5 : iBar * 5 + 5] = torch.tensor(tmpList)
-            return x
+            pPriceScalers, pVolumeScalers = self.getScalers(iFirstBar)
+            xx = torch.tensor([])
+
+            for i in range(N_PAST_BARS):
+                x = self.getOneBarAllTickersTensor(iFirstBar + i * nTickers)
+                # normalize prices and volume by scalers
+                x[:nTickers] /= pPriceScalers;
+                x[nTickers:2*nTickers] /= pPriceScalers
+                x[2*nTickers:3*nTickers] /= pPriceScalers
+                x[3*nTickers:4*nTickers] /= pVolumeScalers
+                xx = torch.cat((xx, x), 0)
+
+            return xx
 
     def getDecisionTensor(self, iPresentBar):
         nTickers = len(self.allTickers)
