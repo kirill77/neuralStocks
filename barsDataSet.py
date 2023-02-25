@@ -49,6 +49,7 @@ class BarsDataSet(Dataset):
         assert(nBarsPerTicker * len(allTickers) == len(allBars))
         self.pPriceScalers = [None] * nBarsPerTicker
         self.pVolumeScalers = [None] * nBarsPerTicker
+        self.pOneBarAllTickersTensors = [None] * nBarsPerTicker
 
         # create all examples
         # to qualify as an example - all PAST_BARS and all FUTURE_BARS of the given stock must be known
@@ -99,17 +100,20 @@ class BarsDataSet(Dataset):
         return self.pPriceScalers[iTimeBar], self.pVolumeScalers[iTimeBar]
     
     def getOneBarAllTickersTensor(self, iFirstBar):
-            nTickers = len(self.allTickers)
-            x = [0] * 5 * nTickers
-            for iBar in range(0, nTickers):
-                bar = self.allBars[iFirstBar + iBar]
-                if (bar.fVolume is not None):
-                    x[iBar] = bar.fMin
-                    x[iBar + nTickers] = bar.fMax
-                    x[iBar + nTickers * 2] = bar.fClose
-                    x[iBar + nTickers * 3] = bar.fVolume
-                    x[iBar + nTickers * 4] = 1 # indicates this is a valid bar
-            return torch.tensor(x)
+            iTimeBar = int(iFirstBar / len(self.allTickers))
+            if (self.pOneBarAllTickersTensors[iTimeBar] is None):
+                nTickers = len(self.allTickers)
+                x = [0] * 5 * nTickers
+                for iBar in range(0, nTickers):
+                    bar = self.allBars[iFirstBar + iBar]
+                    if (bar.fVolume is not None):
+                        x[iBar] = bar.fMin
+                        x[iBar + nTickers] = bar.fMax
+                        x[iBar + nTickers * 2] = bar.fClose
+                        x[iBar + nTickers * 3] = bar.fVolume
+                        x[iBar + nTickers * 4] = 1 # indicates this is a valid bar
+                self.pOneBarAllTickersTensors[iTimeBar] = torch.tensor(x)
+            return self.pOneBarAllTickersTensors[iTimeBar]
 
     def getPastBarsTensor(self, iFirstBar):
             nTickers = len(self.allTickers)
