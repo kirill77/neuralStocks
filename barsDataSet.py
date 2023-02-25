@@ -45,14 +45,9 @@ class BarsDataSet(Dataset):
 
         validateBars(self.allTickers, self.allBars)
 
-        nBarsPerTicker = int(len(allBars) / len(allTickers))
-        assert(nBarsPerTicker * len(allTickers) == len(allBars))
-        self.pPriceScalers = [None] * nBarsPerTicker
-        self.pVolumeScalers = [None] * nBarsPerTicker
-        self.pOneBarAllTickersTensors = [None] * nBarsPerTicker
-
         # create all examples
-        # to qualify as an example - all PAST_BARS and all FUTURE_BARS of the given stock must be known
+        # each example is essentially an index of a bar that we think we should be able to predict the future for
+        # to qualify - the bar must have valid PAST_BARS and valid FUTURE_BARS
         self.allExamples = []
         for firstBarIndex in range(0, len(allBars)):
             allValid = True
@@ -63,6 +58,14 @@ class BarsDataSet(Dataset):
                     break
             if (allValid):
                 self.allExamples.append(firstBarIndex)
+
+        # prepare the arrays where we'll cache tensors during training
+        nBarsPerTicker = int(len(allBars) / len(allTickers))
+        assert(nBarsPerTicker * len(allTickers) == len(allBars))
+        self.pPriceScalers = [None] * nBarsPerTicker
+        self.pVolumeScalers = [None] * nBarsPerTicker
+        self.pOneBarAllTickersTensors = [None] * nBarsPerTicker
+        self.pDecisionTensors = [None] * len(self.allExamples)
 
     def __len__(self):
         return len(self.allExamples)
@@ -76,7 +79,7 @@ class BarsDataSet(Dataset):
     # to get values in approximately [0, 1] interval, we scale prices and volume by coefficients equal to
     # average of prices and volumes in that interval. we compute those coefficients once and cache them in
     # self.pVolumeScalers and self.pPriceScalers
-    def getScalers(self, iFirstBar):
+    def getScalerTensors(self, iFirstBar):
         iTimeBar = int(iFirstBar / len(self.allTickers))
         if (self.pPriceScalers[iTimeBar] is None):
             assert(self.allBars[iFirstBar].iTicker == 0) # check that iFirstBar makes sense
@@ -117,7 +120,7 @@ class BarsDataSet(Dataset):
 
     def getPastBarsTensor(self, iFirstBar):
             nTickers = len(self.allTickers)
-            pPriceScalers, pVolumeScalers = self.getScalers(iFirstBar)
+            pPriceScalers, pVolumeScalers = self.getScalerTensors(iFirstBar)
             xx = torch.tensor([])
 
             for i in range(N_PAST_BARS):
@@ -131,31 +134,35 @@ class BarsDataSet(Dataset):
 
             return xx
 
-    def getDecisionTensor(self, iPresentBar):
-        nTickers = len(self.allTickers)
-        presentBar = self.allBars[iPresentBar]
-        # strong-sell, sell, not-sure, buy, strong-buy
-        y = torch.zeros(5)
-        for i in range(0, N_FUTURE_BARS):
-            iFutureBar = iPresentBar + (i + 1) * nTickers
-            futureBar = self.allBars[iFutureBar]
-            if (futureBar.fMax / presentBar.fClose > 1.05):
-                y[STRONG_BUY] = 1
-            elif (futureBar.fMax / presentBar.fClose > 1.025):
-                y[BUY] = 1
-            if (futureBar.fMin / presentBar.fClose < 0.95):
-                y[STRONG_SELL] = 1
-            elif (futureBar.fMin / presentBar.fClose < 0.975):
-                y[SELL] = 1
+    def getDecisionTensor(self, iExample, iPresentBar):
+        if (self.pDecisionTensors[iExample] is None):
+            nTickers = len(self.allTickers)
+            presentBar = self.allBars[iPresentBar]
 
-        nNonZero = torch.count_nonzero(y).item()
-        if (nNonZero > 1):
-            y = torch.zeros(5)
-            y[NOT_SURE] = 1
-        elif (nNonZero == 0):
-            y[NOT_SURE] = 1
+            # one-hot encoding. classes are: strong-sell, sell, not-sure, buy, strong-buy
+            y = [0] * 5
+            for i in range(0, N_FUTURE_BARS):
+                iFutureBar = iPresentBar + (i + 1) * nTickers
+                futureBar = self.allBars[iFutureBar]
+                if (futureBar.fMax / presentBar.fClose > 1.05):
+                    y[STRONG_BUY] = 1.
+                elif (futureBar.fMax / presentBar.fClose > 1.025):
+                    y[BUY] = 1.
+                if (futureBar.fMin / presentBar.fClose < 0.95):
+                    y[STRONG_SELL] = 1.
+                elif (futureBar.fMin / presentBar.fClose < 0.975):
+                    y[SELL] = 1.
 
-        return y
+            nNonZero = 5 - y.count(0)
+            if (nNonZero > 1):
+                y = [0] * 5
+                y[NOT_SURE] = 1.
+            elif (nNonZero == 0):
+                y[NOT_SURE] = 1.
+
+            self.pDecisionTensors[iExample] = torch.tensor(y)
+
+        return self.pDecisionTensors[iExample]
 
     def getTimeTensor(self, iFirstBar):
         x = torch.zeros(5 + 7 + N_PAST_BARS - 1)
@@ -176,9 +183,9 @@ class BarsDataSet(Dataset):
                 x[5 + 7 + i - 1] = 1
         return x
 
-    def __getitem__(self, idx):
+    def __getitem__(self, iExample):
         nTickers = len(self.allTickers)
-        iExampleBar = self.allExamples[idx]
+        iExampleBar = self.allExamples[iExample]
         iFirstBar = int(iExampleBar / nTickers) * nTickers
         iPredictedTicker = self.allBars[iExampleBar].iTicker
  
@@ -194,7 +201,7 @@ class BarsDataSet(Dataset):
 
         # encode the trading decision
         iPresentBar = iFirstBar + iPredictedTicker + nTickers * (N_PAST_BARS - 1)
-        y = self.getDecisionTensor(iPresentBar)
+        y = self.getDecisionTensor(iExample, iPresentBar)
 
         return x, y
 
