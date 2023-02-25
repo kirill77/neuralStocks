@@ -45,6 +45,11 @@ class BarsDataSet(Dataset):
 
         validateBars(self.allTickers, self.allBars)
 
+        nBarsPerTicker = int(len(allBars) / len(allTickers))
+        assert(nBarsPerTicker * len(allTickers) == len(allBars))
+        self.pPriceScalers = [None] * nBarsPerTicker
+        self.pVolumeScalers = [None] * nBarsPerTicker
+
         # create all examples
         # to qualify as an example - all PAST_BARS and all FUTURE_BARS of the given stock must be known
         self.allExamples = []
@@ -67,34 +72,42 @@ class BarsDataSet(Dataset):
         tPredictedTicker[iPredictedTicker] = 1
         return tPredictedTicker
 
-    def updateScalingValues(self, iFirstBar):
-        assert(self.allBars[iFirstBar].iTicker == 0) # check that iFirstBar makes sense
-        nTickers = len(self.allTickers)
-        self.pVolScalers = [0] * nTickers
-        self.pPriceScalers = [0] * nTickers
-        pCounts = [0] * nTickers
-        for iBar in range(iFirstBar, iFirstBar + N_PAST_BARS * nTickers):
-            bar = self.allBars[iBar]
-            if (bar.fVolume is None): # means bar is invalid (we have some gaps in the dataset)
-                continue
-            self.pVolScalers[bar.iTicker] += bar.fVolume
-            self.pPriceScalers[bar.iTicker] += (bar.fMin + bar.fMax + bar.fOpen + bar.fClose) / 4
-            pCounts[bar.iTicker] += 1
-        for i in range(0, nTickers):
-            assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS)
-            self.pVolScalers[i] / pCounts[i]
-            self.pPriceScalers[i] / pCounts[i]
+    # to get values in approximately [0, 1] interval, we scale prices and volume by coefficients equal to
+    # average of prices and volumes in that interval. we compute those coefficients once and cache them in
+    # self.pVolumeScalers and self.pPriceScalers
+    def getScalers(self, iFirstBar):
+        iTimeBar = int(iFirstBar / len(self.allTickers))
+        if (self.pPriceScalers[iTimeBar] is None):
+            assert(self.allBars[iFirstBar].iTicker == 0) # check that iFirstBar makes sense
+            nTickers = len(self.allTickers)
+            pVolumeScalers = [0] * nTickers
+            pPriceScalers = [0] * nTickers
+            pCounts = [0] * nTickers
+            for iBar in range(iFirstBar, iFirstBar + N_PAST_BARS * nTickers):
+                bar = self.allBars[iBar]
+                if (bar.fVolume is None): # means bar is invalid (we have some gaps in the dataset)
+                    continue
+                pVolumeScalers[bar.iTicker] += bar.fVolume
+                pPriceScalers[bar.iTicker] += (bar.fMin + bar.fMax + bar.fOpen + bar.fClose) / 4
+                pCounts[bar.iTicker] += 1
+            for i in range(0, nTickers):
+                assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS)
+                pVolumeScalers[i] / pCounts[i]
+                pPriceScalers[i] / pCounts[i]
+            self.pPriceScalers[iTimeBar] = pPriceScalers
+            self.pVolumeScalers[iTimeBar] = pVolumeScalers
+        return self.pPriceScalers[iTimeBar], self.pVolumeScalers[iTimeBar]
 
     def getPastBarsTensor(self, iFirstBar):
-            self.updateScalingValues(iFirstBar)
+            pPriceScalers, pVolumeScalers = self.getScalers(iFirstBar)
             nTickers = len(self.allTickers)
             x = torch.zeros(5 * nTickers * N_PAST_BARS)
             for iBar in range(0, nTickers * N_PAST_BARS):
                 bar = self.allBars[iFirstBar + iBar]
-                fVolScaler = self.pVolScalers[bar.iTicker]
-                fPriceScaler = self.pPriceScalers[bar.iTicker]
+                fPriceScaler = pPriceScalers[bar.iTicker]
+                fVolumeScaler = pVolumeScalers[bar.iTicker]
                 if (bar.fVolume is not None):
-                    tmpList = [1, bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolScaler]
+                    tmpList = [1, bar.fMin / fPriceScaler, bar.fMax / fPriceScaler, bar.fClose / fPriceScaler, bar.fVolume / fVolumeScaler]
                     x[iBar * 5 : iBar * 5 + 5] = torch.tensor(tmpList)
             return x
 
