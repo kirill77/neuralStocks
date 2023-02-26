@@ -66,6 +66,7 @@ class BarsDataSet(Dataset):
         self.pVolumeScalers = [None] * nBarsPerTicker
         self.pOneBarAllTickersTensors = [None] * nBarsPerTicker
         self.pDecisionTensors = [None] * len(self.allExamples)
+        self.pTimeTensors = [None] * nBarsPerTicker
 
     def __len__(self):
         return len(self.allExamples)
@@ -165,23 +166,27 @@ class BarsDataSet(Dataset):
         return self.pDecisionTensors[iExample]
 
     def getTimeTensor(self, iFirstBar):
-        x = torch.zeros(5 + 7 + N_PAST_BARS - 1)
-        time0 = self.allBars[iFirstBar].startTime
-        weekDay = time0.weekday()
-        assert(weekDay >= 0 and weekDay < 5)
-        x[weekDay] = 1
-        hour = time0.hour - 9
-        assert(hour >= 0 and hour < 7)
-        x[5 + hour] = 1
         nTickers = len(self.allTickers)
-        # this takes a note if the time difference between the bars is non-standard
-        for i in range(1, N_PAST_BARS):
-            time1 = self.allBars[iFirstBar + i * nTickers].startTime
-            diffSeconds = int((time1 - time0).total_seconds())
-            time0 = time1
-            if (diffSeconds != 3600):
-                x[5 + 7 + i - 1] = 1
-        return x
+        iTime = int(iFirstBar / nTickers)
+        if self.pTimeTensors[iTime] is None:
+            iFirstBar = iTime * nTickers
+            x = [0] * (5 + 7 + N_PAST_BARS - 1)
+            time0 = self.allBars[iFirstBar].startTime
+            weekDay = time0.weekday()
+            assert(weekDay >= 0 and weekDay < 5)
+            x[weekDay] = 1
+            hour = time0.hour - 9
+            assert(hour >= 0 and hour < 7)
+            x[5 + hour] = 1
+            # this takes a note if the time difference between the bars is non-standard
+            for i in range(1, N_PAST_BARS):
+                time1 = self.allBars[iFirstBar + i * nTickers].startTime
+                diffSeconds = int((time1 - time0).total_seconds())
+                time0 = time1
+                if (diffSeconds != 3600):
+                    x[5 + 7 + i - 1] = 1 # non-standard difference
+            self.pTimeTensors[iTime] = torch.tensor(x)
+        return self.pTimeTensors[iTime]
 
     def __getitem__(self, iExample):
         nTickers = len(self.allTickers)
