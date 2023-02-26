@@ -22,10 +22,14 @@ SCHEDULER_STEPS = 2
 SCHEDULER_GAMMA = 0.75
 IS_CUDA = True
 
-# Create events we'll use to measure the GPU time
+# Create device-dependent variables
 if (IS_CUDA):
     startEvent = torch.cuda.Event(enable_timing=True)
     endEvent = torch.cuda.Event(enable_timing=True)
+    pDevice = torch.device("cuda")
+else: pDevice = torch.device("cpu")
+# For some reason this works much faster on the CPU - need to figure out
+pDataSetDevice = torch.device("cpu")
 
 # Define the training loop
 def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
@@ -45,8 +49,9 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
         if (IS_CUDA):
             # Record the start time
             startEvent.record()
-            data = data.to("cuda")
-            target = target.to("cuda")
+        if (data.device.type != pDevice.type):
+            data = data.to(pDevice)
+            target = target.to(pDevice)
 
         # Zero the gradients
         optimizer.zero_grad()
@@ -83,7 +88,7 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
 def main():
     writer = SummaryWriter('logs')
 
-    trainingSet, testingSet = createBarDataSets()
+    trainingSet, testingSet = createBarDataSets(pDataSetDevice)
 
     print(f"number of training examples: {len(trainingSet)}")
     print(f"number of testing examples: {len(testingSet)}")
@@ -92,17 +97,14 @@ def main():
     batchLoader = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
 
     modelConfig = initModelConfig(trainingSet)
-    model = MyModel(modelConfig)
-    if (IS_CUDA):
-        model.to("cuda") # run on the GPU
+    model = MyModel(modelConfig, pDevice)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, betas=(0.9, 0.99), eps=1e-8)
 
     scheduler = StepLR(optimizer, step_size=SCHEDULER_STEPS, gamma=SCHEDULER_GAMMA)
 
     lossFunction = nn.MSELoss()
-    if (IS_CUDA):
-        lossFunction.to("cuda")
+    lossFunction.to(pDevice)
 
     print("starting training...")
     for iEpoch in range(100):

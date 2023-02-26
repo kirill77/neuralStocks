@@ -14,13 +14,14 @@ def initModelConfig(dataSet):
     return config
 
 class MyModel(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, pDevice):
         super().__init__()
-        self.layer0 = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures * 2)
+        self.layer0 = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures * 2, device = pDevice)
         self.function = nn.ReLU()
-        self.layer1 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures * 2)
-        self.layer2 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures)
-        self.layer3 = nn.Linear(in_features = config.nInputFeatures, out_features = config.nOutputFeatures)
+        self.layer1 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures * 2, device = pDevice)
+        self.layer2 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures, device = pDevice)
+        self.layer3 = nn.Linear(in_features = config.nInputFeatures, out_features = config.nOutputFeatures, device = pDevice)
+        self.to(pDevice)
 
     def forward(self, x):
         y = self.layer0(x)

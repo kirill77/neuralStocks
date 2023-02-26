@@ -39,9 +39,10 @@ def validateBars(allTickers, allBars):
 
 class BarsDataSet(Dataset):
 
-    def __init__(self, allTickers, allBars):
+    def __init__(self, allTickers, allBars, pDevice):
         self.allTickers = allTickers
         self.allBars = allBars
+        self.pDevice = pDevice
 
         validateBars(self.allTickers, self.allBars)
 
@@ -60,22 +61,25 @@ class BarsDataSet(Dataset):
                 self.allExamples.append(firstBarIndex)
 
         # prepare the arrays where we'll cache tensors during training
-        nBarsPerTicker = int(len(allBars) / len(allTickers))
+        nTickers = len(allTickers)
+        nBarsPerTicker = int(len(allBars) / nTickers)
         assert(nBarsPerTicker * len(allTickers) == len(allBars))
         self.pPriceScalers = [None] * nBarsPerTicker
         self.pVolumeScalers = [None] * nBarsPerTicker
         self.pOneBarAllTickersTensors = [None] * nBarsPerTicker
         self.pDecisionTensors = [None] * len(self.allExamples)
         self.pTimeTensors = [None] * nBarsPerTicker
+        self.pPredictedTickerTensors = [None] * nTickers
+        for i in range(nTickers):
+            t = [0] * nTickers
+            t[i] = 1
+            self.pPredictedTickerTensors[i] = torch.tensor(t, device = self.pDevice)
 
     def __len__(self):
         return len(self.allExamples)
 
     def getPredictedTickerTensor(self, iPredictedTicker):
-        nTickers = len(self.allTickers)
-        tPredictedTicker = torch.zeros(nTickers)
-        tPredictedTicker[iPredictedTicker] = 1
-        return tPredictedTicker
+        return self.pPredictedTickerTensors[iPredictedTicker]
 
     # to get values in approximately [0, 1] interval, we scale prices and volume by coefficients equal to
     # average of prices and volumes in that interval. we compute those coefficients once and cache them in
@@ -99,8 +103,8 @@ class BarsDataSet(Dataset):
                 assert(pCounts[i] > 0 and pCounts[i] <= N_PAST_BARS)
                 pVolumeScalers[i] /= pCounts[i]
                 pPriceScalers[i] /= pCounts[i]
-            self.pPriceScalers[iTimeBar] = torch.tensor(pPriceScalers)
-            self.pVolumeScalers[iTimeBar] = torch.tensor(pVolumeScalers)
+            self.pPriceScalers[iTimeBar] = torch.tensor(pPriceScalers, device = self.pDevice)
+            self.pVolumeScalers[iTimeBar] = torch.tensor(pVolumeScalers, device = self.pDevice)
         return self.pPriceScalers[iTimeBar], self.pVolumeScalers[iTimeBar]
     
     def getOneBarAllTickersTensor(self, iFirstBar):
@@ -116,13 +120,13 @@ class BarsDataSet(Dataset):
                         x[iBar + nTickers * 2] = bar.fClose
                         x[iBar + nTickers * 3] = bar.fVolume
                         x[iBar + nTickers * 4] = 1 # indicates this is a valid bar
-                self.pOneBarAllTickersTensors[iTimeBar] = torch.tensor(x)
+                self.pOneBarAllTickersTensors[iTimeBar] = torch.tensor(x, device = self.pDevice)
             return self.pOneBarAllTickersTensors[iTimeBar]
 
     def getPastBarsTensor(self, iFirstBar):
             nTickers = len(self.allTickers)
             pPriceScalers, pVolumeScalers = self.getScalerTensors(iFirstBar)
-            xx = torch.tensor([])
+            xx = torch.tensor([], device = self.pDevice)
 
             for i in range(N_PAST_BARS):
                 x = self.getOneBarAllTickersTensor(iFirstBar + i * nTickers)
@@ -161,7 +165,7 @@ class BarsDataSet(Dataset):
             elif (nNonZero == 0):
                 y[NOT_SURE] = 1.
 
-            self.pDecisionTensors[iExample] = torch.tensor(y)
+            self.pDecisionTensors[iExample] = torch.tensor(y, device = self.pDevice)
 
         return self.pDecisionTensors[iExample]
 
@@ -185,7 +189,7 @@ class BarsDataSet(Dataset):
                 time0 = time1
                 if (diffSeconds != 3600):
                     x[5 + 7 + i - 1] = 1 # non-standard difference
-            self.pTimeTensors[iTime] = torch.tensor(x)
+            self.pTimeTensors[iTime] = torch.tensor(x, device = self.pDevice)
         return self.pTimeTensors[iTime]
 
     def __getitem__(self, iExample):
@@ -253,7 +257,7 @@ def verifyBarsDataSet(dataSet):
     except: errorOccurred = True
     assert(errorOccurred)
 
-def createBarDataSets():
+def createBarDataSets(pDevice):
     allTickers, allBars = readTickersAndBars()
 
     # sort all bars by time, and then by the ticker index
@@ -286,8 +290,8 @@ def createBarDataSets():
     testingBars = allBars[nTrainingBars:]
 
     print("creating training and testing datasets...")
-    trainingSet = BarsDataSet(allTickers, trainingBars)
+    trainingSet = BarsDataSet(allTickers, trainingBars, pDevice)
     verifyBarsDataSet(trainingSet)
-    testingSet = BarsDataSet(allTickers, testingBars)
+    testingSet = BarsDataSet(allTickers, testingBars, pDevice)
     verifyBarsDataSet(testingSet)
     return trainingSet, testingSet
