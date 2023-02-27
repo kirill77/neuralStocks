@@ -14,6 +14,33 @@ from torch.utils.tensorboard import SummaryWriter
 from barsDataSet import createBarDataSets
 from theModel import initModelConfig, MyModel
 
+class MyDataLoader:
+    def __init__(self, dataset = None, batch_size = None, shuffle = True):
+        self.pDataSet = dataset
+        self.nElementsPerBatch = batch_size
+
+    def __iter__(self):
+        self.index = 0
+        return self
+    
+    def __next__(self):
+        n = min(len(self.pDataSet) - self.index, self.nElementsPerBatch)
+        if (n == 0):
+            raise StopIteration
+        
+        _x, _y = self.pDataSet[self.index]
+        x = [_x]
+        y = [_y]
+        self.index += 1
+        n -= 1
+        for i in range(n):
+            _x, _y = self.pDataSet[self.index]
+            x.append(_x)
+            y.append(_y)
+            self.index += 1
+
+        return torch.stack(x), torch.stack(y)
+    
 # Global constants
 BATCH_SIZE = 512
 LEARNING_RATE = 0.1
@@ -45,7 +72,14 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
     totalGPUTime = 0
 
     # Loop over the training data
-    for data, target in batchLoader:
+    iterator = iter(batchLoader)
+    while True:
+        # try to get the next batch
+        try:
+            data, target = next(iterator)
+        # no more batches - break
+        except StopIteration: break
+
         if (IS_CUDA):
             # Record the start time
             startEvent.record()
@@ -94,7 +128,7 @@ def main():
     print(f"number of testing examples: {len(testingSet)}")
 
     print("creating data loader...")
-    batchLoader = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
+    batchLoader = MyDataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
 
     modelConfig = initModelConfig(trainingSet)
     model = MyModel(modelConfig, pDevice)
