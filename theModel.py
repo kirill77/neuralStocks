@@ -1,5 +1,9 @@
 from dataclasses import dataclass
+import torch
 import torch.nn as nn
+
+# Global constants
+N_INNER_LAYERS = 5
 
 @dataclass
 class ModelConfig:
@@ -16,19 +20,23 @@ def initModelConfig(dataSet):
 class MyModel(nn.Module):
     def __init__(self, config, pDevice):
         super().__init__()
-        self.layer0 = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures * 2, device = pDevice)
-        self.function = nn.ReLU()
-        self.layer1 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures * 2, device = pDevice)
-        self.layer2 = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nInputFeatures, device = pDevice)
-        self.layer3 = nn.Linear(in_features = config.nInputFeatures, out_features = config.nOutputFeatures, device = pDevice)
+        self.relu = nn.ReLU()
+        self.firstLayer = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures, device = pDevice)
+        self.innerLayers = []
+        for i in range(N_INNER_LAYERS):
+            self.innerLayers.append(nn.Linear(in_features = config.nInputFeatures * 2, out_features=config.nInputFeatures, device = pDevice))
+        self.lastLayer = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nOutputFeatures, device = pDevice)
         self.to(pDevice)
 
     def forward(self, x):
-        y = self.layer0(x)
-        y = self.function(y)
-        y = self.layer1(y)
-        y = self.function(y)
-        y = self.layer2(y)
-        y = self.function(y)
-        y = self.layer3(y)
+        y = self.firstLayer(x)
+        y1 = self.relu( y)
+        y2 = self.relu(-y)
+        y = torch.cat((y1, y2), dim=1)
+        for innerLayer in self.innerLayers:
+            y = innerLayer(y)
+            y1 = self.relu( y)
+            y2 = self.relu(-y)
+            y = torch.cat((y1, y2), dim=1)
+        y = self.lastLayer(y)
         return y
