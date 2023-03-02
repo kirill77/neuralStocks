@@ -64,7 +64,7 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
     # Chat GPT advices to call this once in the beginning of each epoch
     model.train()
 
-    # Initialize the total loss and total number of batches
+    # Initialize the total loss and the total number of batches
     total_loss = 0
     num_batches = 0    
 
@@ -73,16 +73,15 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
 
     # Loop over the training data
     iterator = iter(batchLoader)
-    while True:
-        # try to get the next batch
-        try:
-            data, target = next(iterator)
-        # no more batches - break
-        except StopIteration: break
+    # Assume that at least one batch is available
+    data, target = next(iterator)
 
+    while True:
         if (IS_CUDA):
-            # Record the start time
+            # Record the GPU start time
             startEvent.record()
+
+        # Copy tensors to the training device
         if (data.device.type != pDevice.type):
             data = data.to(pDevice)
             target = target.to(pDevice)
@@ -101,14 +100,26 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
         optimizer.step()
 
         if (IS_CUDA):
-            # Record the end time
+            # Record the GPU end time
             endEvent.record()
+
+        # try to get the next batch while GPU is still busy with the previous batch
+        try:
+            nextData, nextTarget = next(iterator)
+        except StopIteration: nextData = None
+
+        if (IS_CUDA):
             torch.cuda.synchronize()
             totalGPUTime += startEvent.elapsed_time(endEvent)
 
         # Update the total loss and the total number of batches
         total_loss += loss.item()
         num_batches += 1
+
+        if nextData is None:
+            break # no more batches
+        data = nextData
+        target = nextTarget
 
     # Print stats about this epoch
     cpuEnd = time.time()
