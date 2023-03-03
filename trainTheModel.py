@@ -13,33 +13,6 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
 from barsDataSet import createBarDataSets
 from theModel import initModelConfig, MyModel
-
-class MyDataLoader:
-    def __init__(self, dataset = None, batch_size = None, shuffle = True):
-        self.pDataSet = dataset
-        self.nElementsPerBatch = batch_size
-
-    def __iter__(self):
-        self.index = 0
-        return self
-    
-    def __next__(self):
-        n = min(len(self.pDataSet) - self.index, self.nElementsPerBatch)
-        if (n == 0):
-            raise StopIteration
-        
-        _x, _y = self.pDataSet[self.index]
-        x = [_x]
-        y = [_y]
-        self.index += 1
-        n -= 1
-        for i in range(n):
-            _x, _y = self.pDataSet[self.index]
-            x.append(_x)
-            y.append(_y)
-            self.index += 1
-
-        return torch.stack(x), torch.stack(y)
     
 # Global constants
 BATCH_SIZE = 512
@@ -59,22 +32,24 @@ else: pDevice = torch.device("cpu")
 pDataSetDevice = torch.device("cpu")
 
 # Define the training loop
-def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
+def trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer, iEpoch):
 
     # Chat GPT advices to call this once in the beginning of each epoch
     model.train()
 
     # Initialize the total loss and the total number of batches
-    total_loss = 0
-    num_batches = 0    
+    totalTrainingLoss = 0
+    numTrainingBatches = 0
+    totalTestingLoss = 0
+    numTestingBatches = 0
 
     cpuStart = time.time()
     totalGPUTime = 0
 
     # Loop over the training data
-    iterator = iter(batchLoader)
+    trainIter = iter(trainingBatches)
     # Assume that at least one batch is available
-    data, target = next(iterator)
+    data, target = next(trainIter)
 
     while True:
         if (IS_CUDA):
@@ -91,7 +66,6 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
 
         # Forward pass
         output = model(data)
-
         # Calculate the loss
         loss = lossFunction(output, target)
 
@@ -105,7 +79,7 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
 
         # try to get the next batch while GPU is still busy with the previous batch
         try:
-            nextData, nextTarget = next(iterator)
+            nextData, nextTarget = next(trainIter)
         except StopIteration: nextData = None
 
         if (IS_CUDA):
@@ -113,22 +87,44 @@ def trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch):
             totalGPUTime += startEvent.elapsed_time(endEvent)
 
         # Update the total loss and the total number of batches
-        total_loss += loss.item()
-        num_batches += 1
+        fLoss = loss.item();
+        totalTrainingLoss += fLoss
+        numTrainingBatches += 1
 
         if nextData is None:
             break # no more batches
         data = nextData
         target = nextTarget
 
+    # Compute error on testing batches
+    with torch.no_grad():
+        for data, target in testingBatches:
+
+            # Copy tensors to the training device
+            if (data.device.type != pDevice.type):
+                data = data.to(pDevice)
+                target = target.to(pDevice)
+
+            # Forward pass
+            output = model(data)
+            # Calculate the loss
+            loss = lossFunction(output, target)
+
+            # Update the total loss and the total number of batches
+            fLoss = loss.item();
+            totalTestingLoss += fLoss
+            numTestingBatches += 1
+
     # Print stats about this epoch
     cpuEnd = time.time()
     if (iEpoch == 0):
-        print(f"last batch input/output: {data.shape}/{target.shape}, nBatches: {num_batches}")
-    avgLoss = total_loss / num_batches
-    print(f"Epoch {iEpoch}, avg.loss: {avgLoss:.4f}, CPUTime: {(cpuEnd-cpuStart)*1000:.2f}ms, GPUTime: {totalGPUTime:.2f}ms, "\
+        print(f"last batch input/output: {data.shape}/{target.shape}, nBatches: {numTrainingBatches}")
+    avgTrainingLoss = totalTrainingLoss / numTrainingBatches
+    avgTestingLoss = totalTestingLoss / numTestingBatches
+    print(f"Epoch {iEpoch}, trainingLoss: {avgTrainingLoss:.4f}, testingLoss: {avgTestingLoss:.4f}, "
+          f"CPUTime: {(cpuEnd-cpuStart)*1000:.2f}ms, GPUTime: {totalGPUTime:.2f}ms, "\
           f"lr: {optimizer.state_dict()['param_groups'][0]['lr']:.6f}")
-    return avgLoss
+    return avgTrainingLoss
 
 def main():
     writer = SummaryWriter('logs')
@@ -139,7 +135,8 @@ def main():
     print(f"number of testing examples: {len(testingSet)}")
 
     print("creating data loader...")
-    batchLoader = MyDataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
+    trainingBatches = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
+    testingBatches = DataLoader(dataset = testingSet, batch_size = BATCH_SIZE, shuffle = False)
 
     modelConfig = initModelConfig(trainingSet)
     model = MyModel(modelConfig, pDevice)
@@ -154,12 +151,12 @@ def main():
     print("starting training...")
     for iEpoch in range(100):
         # Train an epoch
-        avgLoss = trainAnEpoch(model, batchLoader, lossFunction, optimizer, iEpoch)
+        avgTrainingLoss = trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer, iEpoch)
         # Adjust learning rate
         scheduler.step()
 
         # Log the loss to TensorBoard
-        writer.add_scalar('training_loss', avgLoss, iEpoch)
+        writer.add_scalar('trainingLoss', avgTrainingLoss, iEpoch)
 
     writer.close()
 
