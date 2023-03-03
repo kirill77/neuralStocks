@@ -16,11 +16,10 @@ from theModel import initModelConfig, MyModel
     
 # Global constants
 BATCH_SIZE = 512
-LEARNING_RATE = 0.1
+LEARNING_RATE = 1
 WEIGHT_DECAY = 0.001
-SCHEDULER_STEPS = 2
-SCHEDULER_GAMMA = 0.75
 IS_CUDA = True
+N_FAILED_LEARNING_STEPS = 5
 
 # Create device-dependent variables
 if (IS_CUDA):
@@ -124,7 +123,7 @@ def trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer
     print(f"Epoch {iEpoch}, trainingLoss: {avgTrainingLoss:.4f}, testingLoss: {avgTestingLoss:.4f}, "
           f"CPUTime: {(cpuEnd-cpuStart)*1000:.2f}ms, GPUTime: {totalGPUTime:.2f}ms, "\
           f"lr: {optimizer.state_dict()['param_groups'][0]['lr']:.6f}")
-    return avgTrainingLoss
+    return avgTestingLoss
 
 def main():
     writer = SummaryWriter('logs')
@@ -141,22 +140,39 @@ def main():
     modelConfig = initModelConfig(trainingSet)
     model = MyModel(modelConfig, pDevice)
 
+    global LEARNING_RATE
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, betas=(0.9, 0.99), eps=1e-8)
-
-    scheduler = StepLR(optimizer, step_size=SCHEDULER_STEPS, gamma=SCHEDULER_GAMMA)
 
     lossFunction = nn.CrossEntropyLoss()
     lossFunction.to(pDevice)
 
     print("starting training...")
-    for iEpoch in range(100):
+    bestTestingLoss = 100000000
+    nFailedLearningSteps = 0
+    iEpoch = 0
+    while True:
         # Train an epoch
-        avgTrainingLoss = trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer, iEpoch)
-        # Adjust learning rate
-        scheduler.step()
+        avgTestingLoss = trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer, iEpoch)
+
+        # If we've failed to improve avgTesting loss some number of times - decrease the learning rate
+        if (avgTestingLoss < bestTestingLoss):
+            print("    ** new best model")
+            bestTestingLoss = avgTestingLoss
+            torch.save(model.state_dict(), 'bestModel.pth');
+        else:
+            print("    ** decreasing learning rate")
+            nFailedLearningSteps += 1
+            if (nFailedLearningSteps >= N_FAILED_LEARNING_STEPS):
+                model.load_tate_dict(torch.load('bestModel.pth'))
+                nFailedLearningSteps = 0
+                LEARNING_RATE /= 2
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = LEARNING_RATE
 
         # Log the loss to TensorBoard
-        writer.add_scalar('trainingLoss', avgTrainingLoss, iEpoch)
+        writer.add_scalar('trainingLoss', avgTestingLoss, iEpoch)
+
+        iEpoch += 1
 
     writer.close()
 
