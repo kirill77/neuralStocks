@@ -145,7 +145,7 @@ def main():
 
     scheduler = StepLR(optimizer, step_size=SCHEDULER_STEPS, gamma=SCHEDULER_GAMMA)
 
-    lossFunction = nn.MSELoss()
+    lossFunction = nn.CrossEntropyLoss()
     lossFunction.to(pDevice)
 
     print("starting training...")
