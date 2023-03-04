@@ -50,7 +50,7 @@ def trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer
     # Assume that at least one batch is available
     data, target = next(trainIter)
 
-    while True:
+    for data, target in trainingBatches:
         if (IS_CUDA):
             # Record the GPU start time
             startEvent.record()
@@ -75,13 +75,6 @@ def trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer
         if (IS_CUDA):
             # Record the GPU end time
             endEvent.record()
-
-        # try to get the next batch while GPU is still busy with the previous batch
-        try:
-            nextData, nextTarget = next(trainIter)
-        except StopIteration: nextData = None
-
-        if (IS_CUDA):
             torch.cuda.synchronize()
             totalGPUTime += startEvent.elapsed_time(endEvent)
 
@@ -90,14 +83,12 @@ def trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer
         totalTrainingLoss += fLoss
         numTrainingBatches += 1
 
-        if nextData is None:
-            break # no more batches
-        data = nextData
-        target = nextTarget
-
     # Compute error on testing batches
     with torch.no_grad():
         for data, target in testingBatches:
+            if (IS_CUDA):
+                # Record the GPU start time
+                startEvent.record()
 
             # Copy tensors to the training device
             if (data.device.type != pDevice.type):
@@ -108,6 +99,12 @@ def trainAnEpoch(model, trainingBatches, testingBatches, lossFunction, optimizer
             output = model(data)
             # Calculate the loss
             loss = lossFunction(output, target)
+
+            if (IS_CUDA):
+                # Record the GPU end time
+                endEvent.record()
+                torch.cuda.synchronize()
+                totalGPUTime += startEvent.elapsed_time(endEvent)
 
             # Update the total loss and the total number of batches
             fLoss = loss.item();
@@ -134,8 +131,8 @@ def main():
     print(f"number of testing examples: {len(testingSet)}")
 
     print("creating data loader...")
-    trainingBatches = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True)
-    testingBatches = DataLoader(dataset = testingSet, batch_size = BATCH_SIZE, shuffle = False)
+    trainingBatches = DataLoader(dataset = trainingSet, batch_size = BATCH_SIZE, shuffle = True, num_workers = 4, persistent_workers = True)
+    testingBatches = DataLoader(dataset = testingSet, batch_size = BATCH_SIZE, shuffle = False, num_workers = 4, persistent_workers = True)
 
     modelConfig = initModelConfig(trainingSet)
     model = MyModel(modelConfig, pDevice)
@@ -160,10 +157,10 @@ def main():
             bestTestingLoss = avgTestingLoss
             torch.save(model.state_dict(), 'bestModel.pth');
         else:
-            print("    ** decreasing learning rate")
             nFailedLearningSteps += 1
             if (nFailedLearningSteps >= N_FAILED_LEARNING_STEPS):
-                model.load_tate_dict(torch.load('bestModel.pth'))
+                print("    ** decreasing learning rate")
+                model.load_state_dict(torch.load('bestModel.pth'))
                 nFailedLearningSteps = 0
                 LEARNING_RATE /= 2
                 for param_group in optimizer.param_groups:
