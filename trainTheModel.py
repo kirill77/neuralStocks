@@ -19,7 +19,7 @@ BATCH_SIZE = 512
 LEARNING_RATE = 1
 WEIGHT_DECAY = 0.001
 IS_CUDA = True
-N_FAILED_LEARNING_STEPS = 5
+N_FAILED_LEARNING_STEPS = 10
 
 # Create device-dependent variables
 if (IS_CUDA):
@@ -154,14 +154,15 @@ def main():
         # If we've failed to improve avgTesting loss some number of times - decrease the learning rate
         if (avgTestingLoss < bestTestingLoss):
             print("    ** new best model")
+            nFailedLearningSteps = 0
             bestTestingLoss = avgTestingLoss
             torch.save(model.state_dict(), 'bestModel.pth');
         else:
             nFailedLearningSteps += 1
             if (nFailedLearningSteps >= N_FAILED_LEARNING_STEPS):
                 print("    ** decreasing learning rate")
-                model.load_state_dict(torch.load('bestModel.pth'))
                 nFailedLearningSteps = 0
+                model.load_state_dict(torch.load('bestModel.pth'))
                 LEARNING_RATE /= 2
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = LEARNING_RATE
