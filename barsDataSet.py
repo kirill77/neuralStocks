@@ -5,16 +5,11 @@ import csv
 from datetime import datetime
 from bar import Bar
 import copy
+import myConstants
 
 # global constants
 N_MAX_TICKERS = -1
 N_MAX_BARS_PER_TICKER = -1
-N_TRAINING_BARS_PERCENT = 80
-STRONG_SELL = 0
-SELL = 1
-BUY = 2
-STRONG_BUY = 3
-NOT_SURE = 4
 N_PAST_BARS = 3
 N_FUTURE_BARS = 1
 
@@ -155,20 +150,20 @@ class BarsDataSet(Dataset):
                 iFutureBar = iPresentBar + (i + 1) * nTickers
                 futureBar = self.allBars[iFutureBar]
                 if (futureBar.fMax / presentBar.fClose > 1.05):
-                    y[STRONG_BUY] = 1.
+                    y[myConstants.STRONG_BUY] = 1.
                 elif (futureBar.fMax / presentBar.fClose > 1.025):
-                    y[BUY] = 1.
+                    y[myConstants.BUY] = 1.
                 if (futureBar.fMin / presentBar.fClose < 0.95):
-                    y[STRONG_SELL] = 1.
+                    y[myConstants.STRONG_SELL] = 1.
                 elif (futureBar.fMin / presentBar.fClose < 0.975):
-                    y[SELL] = 1.
+                    y[myConstants.SELL] = 1.
 
             nNonZero = 5 - y.count(0)
             if (nNonZero > 1):
                 y = [0] * 5
-                y[NOT_SURE] = 1.
+                y[myConstants.NOT_SURE] = 1.
             elif (nNonZero == 0):
-                y[NOT_SURE] = 1.
+                y[myConstants.NOT_SURE] = 1.
 
             self.pDecisionTensors[iExample] = torch.tensor(y, device = self.pDevice)
 
@@ -196,13 +191,8 @@ class BarsDataSet(Dataset):
                     x[5 + 7 + i - 1] = 1 # non-standard difference
             self.pTimeTensors[iTime] = torch.tensor(x, device = self.pDevice)
         return self.pTimeTensors[iTime]
-
-    def __getitem__(self, iExample):
-        nTickers = len(self.allTickers)
-        iExampleBar = self.allExamples[iExample]
-        iFirstBar = int(iExampleBar / nTickers) * nTickers
-        iPredictedTicker = self.allBars[iExampleBar].iTicker
- 
+    
+    def getInputTensor(self, iFirstBar, iPredictedTicker):
         x = self.getPredictedTickerTensor(iPredictedTicker)
 
         # encode time information
@@ -212,14 +202,23 @@ class BarsDataSet(Dataset):
         # encode all past bars
         tBar = self.getPastBarsTensor(iFirstBar)
         x = torch.cat((x, tBar), 0)
+        return x
+
+    def __getitem__(self, iExample):
+        nTickers = len(self.allTickers)
+        iExampleBar = self.allExamples[iExample]
+        iFirstBar = int(iExampleBar / nTickers) * nTickers
+        iPredictedTicker = self.allBars[iExampleBar].iTicker
+ 
+        x = self.getInputTensor(iFirstBar, iPredictedTicker)
 
         # encode the trading decision
         iPresentBar = iFirstBar + iPredictedTicker + nTickers * (N_PAST_BARS - 1)
         y = self.getDecisionTensor(iExample, iPresentBar)
 
         return x, y
-
-def readTickersAndBars():
+    
+def readTickersAndBars(sDataDir='history'):
     # load list of tickers
     with open("tickers.txt", 'r') as f:
         data = f.read()
@@ -234,7 +233,7 @@ def readTickersAndBars():
 
     # for each ticker - load its bars from the file
     for iTicker, sTicker in enumerate(allTickers):
-        fileName = f"./history/{sTicker}_1h.csv"
+        fileName = f"./{sDataDir}/{sTicker}_1h.csv"
         print(f"loading bars for {sTicker}")
         nBarsThisTicker = 0;
         with open (fileName) as csvFile:
@@ -252,6 +251,8 @@ def readTickersAndBars():
     return allTickers, allBars
 
 def verifyBarsDataSet(dataSet):
+    if len(dataSet) == 0:
+        return
     # check that the number of items is correct
     firstItem = dataSet.__getitem__(0) # first item must exist
     lastItem = dataSet.__getitem__(len(dataSet) - 1) # last item must exist
@@ -262,8 +263,8 @@ def verifyBarsDataSet(dataSet):
     except: errorOccurred = True
     assert(errorOccurred)
 
-def createBarDataSets(pDevice):
-    allTickers, allBars = readTickersAndBars()
+def createBarDataSets(pDevice=torch.device("cpu"), fTrainFraction=0.8, sDataDir='history'):
+    allTickers, allBars = readTickersAndBars(sDataDir=sDataDir)
 
     # sort all bars by time, and then by the ticker index
     print("sorting bars...")
@@ -289,8 +290,8 @@ def createBarDataSets(pDevice):
     nBarsPerTicker = len(allBars) / nTickers
     assert(nBarsPerTicker == int(nBarsPerTicker))
     nBarsPerTicker = int(nBarsPerTicker)
-    nTrainingBarsPerTicker = int(nBarsPerTicker * N_TRAINING_BARS_PERCENT / 100)
-    nTrainingBars = nTrainingBarsPerTicker * nTickers;
+    nTrainingBarsPerTicker = int(nBarsPerTicker * fTrainFraction)
+    nTrainingBars = nTrainingBarsPerTicker * nTickers
     trainingBars = allBars[0:nTrainingBars]
     testingBars = allBars[nTrainingBars:]
 

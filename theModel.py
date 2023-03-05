@@ -18,7 +18,7 @@ def initModelConfig(dataSet):
     return config
 
 class MyModel(nn.Module):
-    def __init__(self, config, pDevice):
+    def __init__(self, config, pDevice=torch.device("cpu")):
         super().__init__()
         self.relu = nn.ReLU()
         self.firstLayer = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures, device = pDevice)
