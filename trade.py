@@ -17,12 +17,16 @@ trainingSet, testingSet = createBarDataSets(fTrainFraction=0, sDataDir=args.sDat
 
 modelConfig = initModelConfig(testingSet)
 model = MyModel(modelConfig)
-model.load_state_dict(torch.load(args.sModelDir + '\\bestModel.pth'))
+model.loadFromDir(args.sModelDir)
+# disable gradients (only inference here)
+model.eval()
+torch.set_grad_enabled(False)
 
 nTickers = len(testingSet.allTickers)
 nBarsPerTicker = int(len(testingSet.allBars) / len(testingSet.allTickers))
 
-for iTimeBar in range(nBarsPerTicker):
+nTradableTimeBars = nBarsPerTicker - (myConstants.N_PAST_BARS + myConstants.N_FUTURE_BARS - 1)
+for iTimeBar in range(nTradableTimeBars):
     inputTensors = []
     for iTicker in range(nTickers):
         inputTensors.append(testingSet.getInputTensor(iTimeBar * nTickers, iTicker))
@@ -30,10 +34,29 @@ for iTimeBar in range(nBarsPerTicker):
 
     # do the inference
     output = model(inputTensor)
+
     # convert output to probabilities
-    outputPrbb = torch.softmax(output, dim=0)
+    outputPrbb = torch.softmax(output, dim=1)
 
-    outputList = outputPrbb.tolist()
+    y = outputPrbb.tolist()
+
     # find the ticker for which we're most sure what to do
+    fMaxPrbb = -1
+    iBestTicker = None
+    decision = None
+    for iTicker in range(nTickers):
+        fBuyPrbb = y[iTicker][myConstants.BUY] + y[iTicker][myConstants.STRONG_BUY]
+        if (fBuyPrbb > fMaxPrbb):
+            fMaxPrbb = fBuyPrbb
+            iBestTicker = iTicker
+            decision = myConstants.BUY
+        fSellPrbb = y[iTicker][myConstants.SELL] + y[iTicker][myConstants.STRONG_SELL]
+        if (fSellPrbb > fMaxPrbb):
+            fMaxPrbb = fSellPrbb
+            iBestTicker = iTicker
+            decision = myConstants.SELL
 
-    i = 0
+    # if probability is higher than the threshold
+    if (fMaxPrbb > myConstants.TRADE_THRESHOLD):
+         virtualTrader.makeATrade(testingSet, iTimeBar, iTicker, decision)
+  

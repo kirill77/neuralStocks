@@ -7,12 +7,6 @@ from bar import Bar
 import copy
 import myConstants
 
-# global constants
-N_MAX_TICKERS = -1
-N_MAX_BARS_PER_TICKER = -1
-N_PAST_BARS = 3
-N_FUTURE_BARS = 1
-
 def compareBars(a, b):
     if a.startTime < b.startTime:
         return -1
@@ -47,7 +41,7 @@ class BarsDataSet(Dataset):
         self.allExamples = []
         for firstBarIndex in range(0, len(allBars)):
             allValid = True
-            for i in range(0, N_PAST_BARS + N_FUTURE_BARS):
+            for i in range(0, myConstants.N_PAST_BARS + myConstants.N_FUTURE_BARS):
                 barIndex = firstBarIndex + i * len(allTickers)
                 if barIndex >= len(allBars) or allBars[barIndex].fVolume is None:
                     allValid = False
@@ -88,7 +82,7 @@ class BarsDataSet(Dataset):
             pVolumeScalers = [0] * nTickers
             pPriceScalers = [0] * nTickers
             pCounts = [0] * nTickers
-            for iBar in range(iFirstBar, iFirstBar + N_PAST_BARS * nTickers):
+            for iBar in range(iFirstBar, iFirstBar + myConstants.N_PAST_BARS * nTickers):
                 bar = self.allBars[iBar]
                 if (bar.fVolume is None): # means bar is invalid (we have some gaps in the dataset)
                     continue
@@ -129,7 +123,7 @@ class BarsDataSet(Dataset):
             x = []
             y = []
 
-            for i in range(N_PAST_BARS):
+            for i in range(myConstants.N_PAST_BARS):
                 x.append(self.getOneBarAllTickersTensor(iFirstBar + i * nTickers))
                 y += [pPriceScalers, pPriceScalers, pPriceScalers, pVolumeScalers, self.ones]
 
@@ -146,7 +140,7 @@ class BarsDataSet(Dataset):
 
             # one-hot encoding. classes are: strong-sell, sell, not-sure, buy, strong-buy
             y = [0] * 5
-            for i in range(0, N_FUTURE_BARS):
+            for i in range(0, myConstants.N_FUTURE_BARS):
                 iFutureBar = iPresentBar + (i + 1) * nTickers
                 futureBar = self.allBars[iFutureBar]
                 if (futureBar.fMax / presentBar.fClose > 1.05):
@@ -174,7 +168,7 @@ class BarsDataSet(Dataset):
         iTime = int(iFirstBar / nTickers)
         if self.pTimeTensors[iTime] is None:
             iFirstBar = iTime * nTickers
-            x = [0] * (5 + 7 + N_PAST_BARS - 1)
+            x = [0] * (5 + 7 + myConstants.N_PAST_BARS - 1)
             time0 = self.allBars[iFirstBar].startTime
             weekDay = time0.weekday()
             assert(weekDay >= 0 and weekDay < 5)
@@ -183,7 +177,7 @@ class BarsDataSet(Dataset):
             assert(hour >= 0 and hour < 7)
             x[5 + hour] = 1
             # this takes a note if the time difference between the bars is non-standard
-            for i in range(1, N_PAST_BARS):
+            for i in range(1, myConstants.N_PAST_BARS):
                 time1 = self.allBars[iFirstBar + i * nTickers].startTime
                 diffSeconds = int((time1 - time0).total_seconds())
                 time0 = time1
@@ -213,7 +207,7 @@ class BarsDataSet(Dataset):
         x = self.getInputTensor(iFirstBar, iPredictedTicker)
 
         # encode the trading decision
-        iPresentBar = iFirstBar + iPredictedTicker + nTickers * (N_PAST_BARS - 1)
+        iPresentBar = iFirstBar + iPredictedTicker + nTickers * (myConstants.N_PAST_BARS - 1)
         y = self.getDecisionTensor(iExample, iPresentBar)
 
         return x, y
@@ -225,8 +219,8 @@ def readTickersAndBars(sDataDir='history'):
     allTickers = data.splitlines()
     allTickers = [w.strip() for w in allTickers] # get rid of any leading or trailing white space
     allTickers = [w for w in allTickers if w] # get rid of any empty strings
-    if (N_MAX_TICKERS != -1):
-        allTickers = allTickers[0:N_MAX_TICKERS]
+    if (myConstants.N_MAX_TICKERS != -1):
+        allTickers = allTickers[0:myConstants.N_MAX_TICKERS]
     print(f"number of tickers in the dataset: {len(allTickers)}")
 
     allBars = []
@@ -244,7 +238,7 @@ def readTickersAndBars(sDataDir='history'):
                     continue
                 allBars.append(bar)
                 nBarsThisTicker += 1
-                if N_MAX_BARS_PER_TICKER > 0 and nBarsThisTicker >= N_MAX_BARS_PER_TICKER:
+                if myConstants.N_MAX_BARS_PER_TICKER > 0 and nBarsThisTicker >= myConstants.N_MAX_BARS_PER_TICKER:
                     break
     print(f"loaded {len(allBars)} bars")
 
