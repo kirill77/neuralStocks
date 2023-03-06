@@ -20,23 +20,36 @@ def initModelConfig(dataSet):
 class MyModel(nn.Module):
     def __init__(self, config, pDevice=torch.device("cpu")):
         super().__init__()
+        self.layers = nn.ModuleList([])
+        self.layers.append(nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures, device = pDevice))
         self.relu = nn.ReLU()
-        self.firstLayer = nn.Linear(in_features = config.nInputFeatures, out_features=config.nInputFeatures, device = pDevice)
-        self.innerLayers = []
         for i in range(N_INNER_LAYERS):
-            self.innerLayers.append(nn.Linear(in_features = config.nInputFeatures * 2, out_features=config.nInputFeatures, device = pDevice))
-        self.lastLayer = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nOutputFeatures, device = pDevice)
-        self.to(pDevice)
+            self.layers.append(nn.Linear(in_features = config.nInputFeatures * 2, out_features=config.nInputFeatures, device = pDevice))
+        self.outputLayer = nn.Linear(in_features = config.nInputFeatures * 2, out_features = config.nOutputFeatures, device = pDevice)
+        self.pDevice = pDevice
+        self.to(self.pDevice)
+
+    def loadFromDir(self, sDirName):
+            print(f"loading the model from directory [{sDirName}]");
+            prevModelDict = self.state_dict() # save previous model just in case
+            try:
+                newModelDict = torch.load(sDirName + '\\bestModel.pth')
+                self.load_state_dict(newModelDict)
+                print("    *** succeeded")
+            except:
+                print("    *** dailed")
+                self.load_state_dict(prevModelDict) # restore previous model
+            self.to(self.pDevice)
+
+    def saveToDir(self, sDirName):
+            modelDict = self.state_dict()
+            torch.save(modelDict, sDirName + '\\bestModel.pth')
 
     def forward(self, x):
-        y = self.firstLayer(x)
-        y1 = self.relu( y)
-        y2 = self.relu(-y)
-        y = torch.cat((y1, y2), dim=1)
-        for innerLayer in self.innerLayers:
-            y = innerLayer(y)
-            y1 = self.relu( y)
-            y2 = self.relu(-y)
-            y = torch.cat((y1, y2), dim=1)
-        y = self.lastLayer(y)
-        return y
+        for layer in self.layers:
+            x = layer(x)
+            x1 = self.relu( x)
+            x2 = self.relu(-x)
+            x = torch.cat((x1, x2), dim=1)
+        x = self.outputLayer(x)
+        return x
